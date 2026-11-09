@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Court · AI rulings on GenLayer</title>
+<meta name="description" content="Submit a disputed deliverable and get a ruling from GenLayer validators.">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%235a1623'/><g fill='none' stroke='%23e2bf6a' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'><path d='M32 12v38M20 52h24M14 20h36'/><path d='M14 20L7 36h14zM50 20l-7 16h14z'/></g></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,500;0,6..72,700;1,6..72,500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #5a1623;
+    --sheet: #f7f9fa;
+    --ink: #14213d;
+    --muted: #55627a;
+    --line: #c5cfd8;
+    --brass: #a8832f;
+    --pay: #1f7a5c;
+    --refund: #8c2f39;
+    --radius: 6px;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-padding-top: 1rem; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font: 400 16px/1.55 "IBM Plex Sans", system-ui, sans-serif;
+  }
+  main { max-width: 1040px; margin: 0 auto; padding: 3rem 1.25rem 4rem; }
+  h1 {
+    font: 700 clamp(2.4rem, 6vw, 4rem)/1.02 "Newsreader", Georgia, serif;
+    letter-spacing: -0.02em; margin: 0 0 .75rem; color: #f8eee6;
+  }
+  .lede { max-width: 56ch; color: #e6cdd0; font-size: 1.075rem; margin: 0 0 2.5rem; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; align-items: start; }
+  @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
+  .sheet {
+    background: var(--sheet); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 1.5rem; border-top: 4px solid var(--brass);
+  }
+  h2 { font: 700 1.35rem/1.2 "Newsreader", Georgia, serif; margin: 0 0 1rem; }
+  label { display: block; font-weight: 600; font-size: .9rem; margin: 1rem 0 .3rem; }
+  input, textarea {
+    width: 100%; font: inherit; color: inherit; background: #fff;
+    border: 1px solid var(--line); border-radius: var(--radius); padding: .65rem .75rem;
+  }
+  textarea { min-height: 120px; resize: vertical; }
+  input:focus-visible, textarea:focus-visible, button:focus-visible, summary:focus-visible {
+    outline: 3px solid var(--brass); outline-offset: 2px;
+  }
+  .hint { color: var(--muted); font-size: .85rem; margin-top: .3rem; }
+  button.primary {
+    margin-top: 1.25rem; width: 100%; padding: .85rem 1rem; font: 600 1rem "IBM Plex Sans", sans-serif;
+    color: #fff; background: var(--ink); border: 0; border-radius: var(--radius); cursor: pointer;
+  }
+  button.primary:hover:not(:disabled) { background: #1d305c; }
+  button.primary:disabled { opacity: .55; cursor: progress; }
+  .who { font-size: .85rem; color: var(--muted); margin-top: 1rem; overflow-wrap: anywhere; }
+  .progress { list-style: none; padding: 0; margin: 0 0 1rem; }
+  .progress li { padding: .35rem 0 .35rem 1.6rem; position: relative; color: var(--muted); }
+  .progress li::before {
+    content: ""; position: absolute; left: 0; top: .72rem; width: .8rem; height: .8rem;
+    border-radius: 50%; border: 2px solid var(--line);
+  }
+  .progress li.active { color: var(--ink); font-weight: 600; }
+  .progress li.active::before { border-color: var(--brass); background: var(--brass); }
+  .progress li.done { color: var(--ink); }
+  .progress li.done::before { border-color: var(--pay); background: var(--pay); }
+  .empty { color: var(--muted); }
+  .error { color: var(--refund); font-weight: 500; margin-top: 1rem; overflow-wrap: anywhere; }
+
+  .ruling { border: 2px solid var(--ink); border-radius: var(--radius); padding: 1.25rem; background: #fff; }
+  .ruling .word {
+    font: 700 clamp(1.9rem, 4.5vw, 2.6rem)/1 "Newsreader", Georgia, serif; letter-spacing: -0.01em;
+  }
+  .ruling.pay .word { color: var(--pay); }
+  .ruling.refund .word { color: var(--refund); }
+  .ruling .meta { margin: .6rem 0; font-weight: 600; }
+  .bar { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; margin: .4rem 0 1rem; }
+  .bar > span { display: block; height: 100%; background: var(--ink); }
+  .ruling p { margin: 0; }
+  .stamp { animation: stamp .35s ease-out; }
+  @keyframes stamp { from { transform: scale(1.06); opacity: 0; } to { transform: none; opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .stamp { animation: none; } }
+
+  .docket { margin-top: 1.5rem; }
+  .case { border-top: 1px solid var(--line); padding: .75rem 0; }
+  .case:first-child { border-top: 0; }
+  .case summary { cursor: pointer; display: flex; gap: .75rem; justify-content: space-between; }
+  .case .tag { font-weight: 600; }
+  .case .tag.pay { color: var(--pay); } .case .tag.refund { color: var(--refund); }
+  .case dl { margin: .6rem 0 0; font-size: .9rem; color: var(--muted); overflow-wrap: anywhere; }
+  .case dt { font-weight: 600; color: var(--ink); margin-top: .4rem; }
+  .case dd { margin: 0; }
+  footer { margin-top: 2.5rem; color: #dcbcc1; font-size: .85rem; }
+  code { font-size: .85em; }
+
+  /* ---- Animated validator-network logo (side) ---- */
+  @property --accent { syntax: "<color>"; inherits: true; initial-value: #e2bf6a; }
+  .brand { display: flex; align-items: center; gap: clamp(.75rem, 2vw, 1.25rem); margin: 0 0 .75rem; }
+  .brand h1 { margin: 0; }
+  .court {
+    flex: none; width: clamp(60px, 10vw, 92px);
+    --accent: #e2bf6a;
+    transition: --accent .7s ease;
+  }
+  .court svg { width: 100%; height: auto; display: block; overflow: visible; }
+  .court[data-state="pay"]    { --accent: #6fe0b0; }
+  .court[data-state="refund"] { --accent: #ff9aa2; }
+  .court .ring  { fill: none; stroke: var(--accent); stroke-opacity: .35; stroke-width: 1.5; stroke-dasharray: 2 5; }
+  .court .orbit { transform-origin: 80px 80px; animation: spin 40s linear infinite; }
+  .court .link  { stroke: var(--accent); stroke-width: 1.6; stroke-dasharray: 3 6; stroke-opacity: .85; animation: flow 1.4s linear infinite; }
+  .court .node  { fill: var(--accent); }
+  .court .node-ring { fill: none; stroke: var(--accent); stroke-opacity: .5; stroke-width: 1.5; }
+  .court .core  { transform-origin: 80px 80px; animation: pulse 3.2s ease-in-out infinite; }
+  .court .hex   { fill: #5a1623; stroke: var(--accent); stroke-width: 3; stroke-linejoin: round; }
+  .court .spark { fill: var(--accent); }
+  .court[data-state="work"] .orbit { animation-duration: 7s; }
+  .court[data-state="work"] .link  { animation-duration: .35s; }
+  .court[data-state="work"] .core  { animation-duration: .9s; }
+  .court[data-state="pay"] .orbit, .court[data-state="refund"] .orbit { animation-duration: 28s; }
+  .court[data-state="pay"] .link, .court[data-state="refund"] .link { animation-duration: 2.4s; }
+  @keyframes spin  { to { transform: rotate(360deg); } }
+  @keyframes flow  { to { stroke-dashoffset: -18; } }
+  @keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.07); } }
+  @media (prefers-reduced-motion: reduce) {
+    .court .orbit, .court .link, .court .core { animation: none; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header class="brand">
+<div class="court" id="court" data-state="idle" role="img" aria-label="Validator network reaching consensus">
+  <svg viewBox="0 0 160 160" aria-hidden="true">
+    <circle class="ring" cx="80" cy="80" r="58"/>
+    <g class="orbit">
+      <g class="links">
+        <line class="link" x1="80" y1="80" x2="80" y2="22"/>
+        <line class="link" x1="80" y1="80" x2="135.2" y2="62.1"/>
+        <line class="link" x1="80" y1="80" x2="114.1" y2="126.9"/>
+        <line class="link" x1="80" y1="80" x2="45.9" y2="126.9"/>
+        <line class="link" x1="80" y1="80" x2="24.8" y2="62.1"/>
+      </g>
+      <g>
+        <circle class="node-ring" cx="80" cy="22" r="9"/><circle class="node" cx="80" cy="22" r="4.5"/>
+        <circle class="node-ring" cx="135.2" cy="62.1" r="9"/><circle class="node" cx="135.2" cy="62.1" r="4.5"/>
+        <circle class="node-ring" cx="114.1" cy="126.9" r="9"/><circle class="node" cx="114.1" cy="126.9" r="4.5"/>
+        <circle class="node-ring" cx="45.9" cy="126.9" r="9"/><circle class="node" cx="45.9" cy="126.9" r="4.5"/>
+        <circle class="node-ring" cx="24.8" cy="62.1" r="9"/><circle class="node" cx="24.8" cy="62.1" r="4.5"/>
+      </g>
+    </g>
+    <g class="core">
+      <path class="hex" d="M80 56L100.8 68V92L80 104L59.2 92V68Z"/>
+      <path class="spark" d="M80 66L83.5 76.5L94 80L83.5 83.5L80 94L76.5 83.5L66 80L76.5 76.5Z"/>
+    </g>
+  </svg>
+</div>
+    <h1>Agent Court</h1>
+  </header>
+  <p class="lede">Paste a deliverable link and the rules both sides agreed to. GenLayer validators read the page, judge it, and decide how the escrowed funds are split. Yellow then settles that split.</p>
+
+  <div class="grid">
+    <section class="sheet" aria-labelledby="file-h">
+      <h2 id="file-h">File a dispute</h2>
+      <form id="form" novalidate>
+        <label for="url">Deliverable link</label>
+        <input id="url" type="url" placeholder="https://example.com/seller-proof" required>
+        <div class="hint">Must be public. Validators can't open pages behind a login.</div>
+
+        <label for="rules">Agreed rules</label>
+        <textarea id="rules" placeholder="The page must name the project, list at least three features, and link to a live demo." required></textarea>
+
+        <button class="primary" id="go" type="submit">Request ruling</button>
+        <div class="error" id="err" role="alert"></div>
+      </form>
+
+      <details style="margin-top:1.25rem">
+        <summary>Contract settings</summary>
+        <label for="addr">Adjudicator contract address</label>
+        <input id="addr" placeholder="0x…" spellcheck="false">
+        <div class="hint">The address you got when deploying <code>agent_court_adjudicator.py</code> in GenLayer Studio.</div>
+      </details>
+      <div class="who" id="who"></div>
+    </section>
+
+    <section class="sheet" aria-labelledby="rule-h" aria-live="polite">
+      <h2 id="rule-h">Ruling</h2>
+      <ol class="progress" id="progress" hidden>
+        <li data-s="send">Sending the dispute</li>
+        <li data-s="consensus">Validators reaching consensus</li>
+        <li data-s="read">Reading the ruling</li>
+      </ol>
+      <div id="result"><p class="empty">No ruling yet. File a dispute to see the verdict here.</p></div>
+    </section>
+  </div>
+
+  <section class="sheet docket" aria-labelledby="dock-h">
+    <h2 id="dock-h">Recent cases</h2>
+    <div id="docket"><p class="empty">Loading cases…</p></div>
+  </section>
+
+  <footer>Internet Court · GenLayer · Yellow. Runs on GenLayer Studio (testnet). Rulings are produced by LLM validators and are for testing only.</footer>
+</main>
+
+<script type="module">
+import { createClient, createAccount, generatePrivateKey } from "https://esm.sh/genlayer-js@latest";
+import { studionet } from "https://esm.sh/genlayer-js@latest/chains";
+
+/* ---- Set this after deploying in GenLayer Studio (or use ?contract=0x… in the URL) ---- */
+const DEFAULT_CONTRACT = "0xa311d5a6b22e07e0aA112E7c2488eF53271F8498";
+
+const $ = (id) => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+const store = {
+  get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
+  set: (k, v) => { try { localStorage.setItem(k, v); } catch {} },
+};
+
+/* ---- Account: a throwaway Studio key kept in this browser ---- */
+let key = store.get("ac_key");
+if (!key) { key = generatePrivateKey(); store.set("ac_key", key); }
+const account = createAccount(key);
+$("who").textContent = "Filing as " + account.address;
+const setCourt = (state) => { $("court").dataset.state = state; };
+
+const client = createClient({ chain: studionet, account });
+let consensusReady = false;
+async function ensureReady() {
+  if (consensusReady) return;
+  try { await client.initializeConsensusSmartContract(); } catch (e) { /* already initialized */ }
+  consensusReady = true;
+}
+
+/* ---- Contract address ---- */
+$("addr").value = params.get("contract") || store.get("ac_addr") || DEFAULT_CONTRACT;
+$("addr").addEventListener("change", () => { store.set("ac_addr", $("addr").value.trim()); loadDocket(); });
+const contract = () => $("addr").value.trim();
+
+/* ---- UI helpers ---- */
+function setStep(active) {
+  const order = ["send", "consensus", "read"];
+  $("progress").hidden = active === null;
+  document.querySelectorAll("#progress li").forEach((li) => {
+    const i = order.indexOf(li.dataset.s), a = order.indexOf(active);
+    li.className = a === -1 ? "" : i < a ? "done" : i === a ? "active" : "";
+  });
+}
+
+function el(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined) n.textContent = text;
+  return n;
+}
+
+/* Older contract versions only return a verdict; derive the split from it. */
+function sellerPct(c) {
+  if (typeof c.seller_percent === "number") return c.seller_percent;
+  return c.verdict === "PAY_SELLER" ? 100 : 0;
+}
+function verdictTitle(pct) {
+  return pct >= 100 ? "Pay the seller" : pct <= 0 ? "Refund the buyer" : "Split the funds";
+}
+
+function rulingCard(c) {
+  const pct = sellerPct(c);
+  const box = el("div", "ruling stamp " + (pct >= 50 ? "pay" : "refund"));
+  box.append(el("div", "word", verdictTitle(pct)));
+  box.append(el("div", "meta", "Seller " + pct + "% · Buyer " + (100 - pct) + "%"));
+  const split = el("div", "bar"); const sf = el("span"); sf.style.width = pct + "%"; split.append(sf); box.append(split);
+  box.append(el("p", "", c.reason));
+  box.append(el("p", "hint", "Confidence " + c.confidence + "% · Yellow settles this split when the room closes."));
+  return box;
+}
+
+async function readCase(id) {
+  const raw = await client.readContract({ address: contract(), functionName: "get_case", args: [id] });
+  return raw ? JSON.parse(raw) : null;
+}
+async function caseCount() {
+  return Number(await client.readContract({ address: contract(), functionName: "get_case_count", args: [] }));
+}
+
+async function loadDocket() {
+  const box = $("docket");
+  if (!contract()) { box.replaceChildren(el("p", "empty", "Add the contract address under Contract settings to see cases.")); return; }
+  try {
+    const n = await caseCount();
+    if (n === 0) { box.replaceChildren(el("p", "empty", "No cases yet. Be the first to file one.")); return; }
+    const items = [];
+    for (let i = n - 1; i >= Math.max(0, n - 5); i--) {
+      const c = await readCase(i); if (!c) continue;
+      const pct = sellerPct(c), pay = pct >= 50;
+      const d = el("details", "case");
+      const s = el("summary");
+      s.append(el("span", "", "Case " + c.case_id));
+      s.append(el("span", "tag " + (pay ? "pay" : "refund"), "Seller " + pct + "% / Buyer " + (100 - pct) + "%"));
+      const dl = el("dl");
+      [["Deliverable", c.deliverable_url], ["Rules", c.spec_rules], ["Reasoning", c.reason]].forEach(([t, v]) => {
+        dl.append(el("dt", "", t)); dl.append(el("dd", "", v));
+      });
+      d.append(s, dl); items.push(d);
+    }
+    box.replaceChildren(...items);
+  } catch (e) {
+    box.replaceChildren(el("p", "error", "Couldn't load cases. Check the contract address."));
+  }
+}
+
+/* ---- Submit a dispute ---- */
+$("form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const url = $("url").value.trim(), rules = $("rules").value.trim();
+  $("err").textContent = "";
+  if (!contract()) { $("err").textContent = "Add the contract address under Contract settings first."; return; }
+  if (!/^https?:\/\//.test(url)) { $("err").textContent = "Enter a public link starting with http:// or https://."; return; }
+  if (!rules) { $("err").textContent = "Describe the rules the work must meet."; return; }
+
+  const btn = $("go"); btn.disabled = true; btn.textContent = "Ruling in progress…"; setCourt("work");
+  $("result").replaceChildren();
+  try {
+    await ensureReady();
+    setStep("send");
+    const hash = await client.writeContract({ address: contract(), functionName: "resolve_dispute", args: [url, rules], value: 0n });
+
+    setStep("consensus");
+    await client.waitForTransactionReceipt({ hash, status: "ACCEPTED", retries: 120, interval: 3000 });
+
+    setStep("read");
+    const n = await caseCount();
+    let found = null;
+    for (let i = n - 1; i >= Math.max(0, n - 10); i--) {
+      const c = await readCase(i);
+      if (c && c.deliverable_url === url && c.requester.toLowerCase() === account.address.toLowerCase()) { found = c; break; }
+    }
+    setStep(null);
+    if (!found) throw new Error("The ruling was accepted but the case wasn't found. Refresh the page and check Recent cases.");
+    $("result").replaceChildren(rulingCard(found));
+    setCourt(sellerPct(found) >= 50 ? "pay" : "refund");
+    loadDocket();
+  } catch (e) {
+    setStep(null); setCourt("idle");
+    $("result").replaceChildren(el("p", "empty", "No ruling yet. File a dispute to see the verdict here."));
+    $("err").textContent = "Something went wrong: " + (e && e.message ? e.message : e);
+  } finally {
+    btn.disabled = false; btn.textContent = "Request ruling";
+  }
+});
+
+loadDocket();
+</script>
+</body>
+</html>
