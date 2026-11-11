@@ -1,0 +1,113 @@
+/**
+ * Shared Yellow settlement-room helpers (live or simulated).
+ * Used by scripts/yellow_settlement.ts (full demo) and scripts/settle.ts (settle one case).
+ *
+ * LIVE needs BUYER_PK, SELLER_PK, COURT_PK. Without them the room is simulated, and callers
+ * must say so on screen.
+ */
+import "dotenv/config";
+import { Decimal } from "decimal.js";
+import { privateKeyToAddress } from "viem/accounts";
+import type { AppDefinitionV1, AppStateUpdateV1 } from "@yellow-org/sdk";
+
+const env = process.env;
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+export const LIVE = !!(env.BUYER_PK && env.SELLER_PK && env.COURT_PK) && env.YELLOW_MODE !== "dry";
+export const WS_URL = env.YELLOW_WS_URL ?? "wss://nitronode-sandbox.yellow.org/v1/ws";
+export const ASSET = env.YELLOW_ASSET ?? "usdc";
+export const AMOUNT = new Decimal(env.ESCROW_AMOUNT ?? "10");
+/** Weights 1/1/1 with quorum 2: buyer+seller agree, or the court plus one side. */
+export const QUORUM = 2;
+
+// ---------------------------------------------------------------------------
+// Yellow side (live or simulated)
+// ---------------------------------------------------------------------------
+export interface Room {
+  open(): Promise<string>;
+  deposit(): Promise<void>;
+  settle(sellerAmt: Decimal, buyerAmt: Decimal, favoured: "seller" | "buyer"): Promise<void>;
+}
+
+export async function liveRoom(pk: { buyer: `0x${string}`; seller: `0x${string}`; court: `0x${string}` }, deliverable: string): Promise<Room> {
+  const sdk = await import("@yellow-org/sdk");
+  const addr = { buyer: privateKeyToAddress(pk.buyer), seller: privateKeyToAddress(pk.seller), court: privateKeyToAddress(pk.court) };
+  const signer = (k: `0x${string}`) => new sdk.AppSessionWalletSignerV1(new sdk.EthereumMsgSigner(k));
+  const sg = { buyer: signer(pk.buyer), seller: signer(pk.seller), court: signer(pk.court) };
+
+  const s = sdk.createSigners(pk.buyer);
+  const client = await sdk.Client.create(
+    WS_URL, s.stateSigner, s.txSigner,
+    sdk.withBlockchainRPC(BigInt(env.YELLOW_CHAIN_ID!), env.YELLOW_RPC_URL!),
+  );
+
+  let sessionId = "";
+  const version = async (): Promise<bigint> => (await client.getAppSessions({ appSessionId: sessionId })).sessions[0].version;
+
+  return {
+    async open() {
+      // Prerequisite from Yellow's skill: the depositor must already hold a balance.
+      const balances: any = await client.getBalances(addr.buyer);
+      const list: any[] = Array.isArray(balances) ? balances : (balances?.balances ?? []);
+      const mine = list.find((b) => String(b.asset).toLowerCase() === ASSET.toLowerCase());
+      if (!mine || new Decimal(String(mine.amount ?? mine.balance ?? 0)).lt(AMOUNT)) {
+        throw new Error(`Buyer needs at least ${AMOUNT} ${ASSET} at Yellow (see README: funding). Found: ${JSON.stringify(balances)}`);
+      }
+      const definition: AppDefinitionV1 = {
+        applicationId: "agent-court",
+        participants: [
+          { walletAddress: addr.buyer, signatureWeight: 1 },
+          { walletAddress: addr.seller, signatureWeight: 1 },
+          { walletAddress: addr.court, signatureWeight: 1 },
+        ],
+        quorum: QUORUM,
+        nonce: BigInt(Date.now()) * 1_000_000n + BigInt(Math.floor(Math.random() * 1_000_000)),
+      };
+      const data = JSON.stringify({ app: "agent-court", deliverable });
+      const payload = sdk.packCreateAppSessionRequestV1(definition, data);
+      const created = await client.createAppSession(definition, data, [
+        await sg.buyer.signMessage(payload), await sg.seller.signMessage(payload), await sg.court.signMessage(payload),
+      ]);
+      sessionId = created.appSessionId;
+      return sessionId;
+    },
+    async deposit() {
+      const update: AppStateUpdateV1 = {
+        appSessionId: sessionId, intent: sdk.AppStateUpdateIntent.Deposit, version: (await version()) + 1n,
+        allocations: [{ participant: addr.buyer, asset: ASSET, amount: AMOUNT }],
+        sessionData: JSON.stringify({ intent: "fund" }),
+      };
+      const h = sdk.packAppStateUpdateV1(update);
+      await client.submitAppSessionDeposit(update, [await sg.buyer.signMessage(h), await sg.court.signMessage(h)], ASSET, AMOUNT);
+    },
+    async settle(sellerAmt, buyerAmt, favoured) {
+      const allocations = [
+        { participant: addr.seller, asset: ASSET, amount: sellerAmt },
+        { participant: addr.buyer, asset: ASSET, amount: buyerAmt },
+      ].filter((a) => a.amount.gt(0)); // restate non-zero allocations only
+      const partner = sg[favoured]; // court + the favoured side reach quorum 2
+
+      const operate: AppStateUpdateV1 = {
+        appSessionId: sessionId, intent: sdk.AppStateUpdateIntent.Operate, version: (await version()) + 1n,
+        allocations, sessionData: JSON.stringify({ round: "gen-layer-ruling" }),
+      };
+      const oh = sdk.packAppStateUpdateV1(operate);
+      await client.submitAppState(operate, [await sg.court.signMessage(oh), await partner.signMessage(oh)]);
+
+      const close: AppStateUpdateV1 = {
+        appSessionId: sessionId, intent: sdk.AppStateUpdateIntent.Close, version: (await version()) + 1n,
+        allocations, sessionData: JSON.stringify({ round: "close" }),
+      };
+      const ch = sdk.packAppStateUpdateV1(close);
+      await client.submitAppState(close, [await sg.court.signMessage(ch), await partner.signMessage(ch)]);
+    },
+  };
+}
+
+export function dryRoom(): Room {
+  return {
+    open: async () => { await sleep(900); return "0x" + "dry".padEnd(8, "0") + Date.now().toString(16).padStart(56, "0"); },
+    deposit: async () => { await sleep(700); },
+    settle: async () => { await sleep(1100); },
+  };
+}
