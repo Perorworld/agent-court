@@ -1,0 +1,25 @@
+{
+  "name": "internet-court-partner-demo-lab",
+  "version": "1.0.0",
+  "description": "Judged Settlement Room — Internet Court x GenLayer x Yellow",
+  "type": "module",
+  "scripts": {
+    "demo": "tsx scripts/yellow_settlement.ts",
+    "settle": "tsx scripts/settle.ts",
+    "demo:dry": "YELLOW_MODE=dry tsx scripts/yellow_settlement.ts",
+    "demo:local": "GENLAYER_NETWORK=localnet tsx scripts/yellow_settlement.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@yellow-org/sdk": "^1",
+    "decimal.js": "^10.4.3",
+    "dotenv": "^16.4.5",
+    "genlayer-js": "latest",
+    "viem": "^2.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0"
+  }
+}
