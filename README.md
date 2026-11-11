@@ -52,6 +52,8 @@ The room is where the money lives. Funds are pooled and reallocated off-chain wi
 |------|---------|
 | `contracts/agent_court_adjudicator.py` | GenLayer Intelligent Contract (`resolve_dispute` → split) |
 | `scripts/yellow_settlement.ts` | End-to-end demo: Yellow room + GenLayer ruling + settlement |
+| `scripts/settle.ts` | `npm run settle -- --case N`: settle one GenLayer ruling through a Yellow room |
+| `scripts/lib/yellow_room.ts` | Shared Yellow room helpers (live or simulated) |
 | `web/index.html` | Public interface (deploys as a static page on Vercel) |
 | `skills/internet_court_yellow_genlayer_skill.md` | Agent skill; composes with Yellow's settlement-room skill |
 | `demo/deliverable.md` | Sample deliverable the demo adjudicates |
@@ -81,6 +83,19 @@ npm run demo
 Funding: Yellow's skill never funds accounts, so the buyer must already hold `ESCROW_AMOUNT` of `YELLOW_ASSET` at Yellow. Follow Yellow's quickstart at `docs.yellow.org` for the one-time deposit.
 
 **4. Web page:** put your contract address in `DEFAULT_CONTRACT` inside `web/index.html` (or open the page with `?contract=0x…`), upload the repo to GitHub, and import it in Vercel with the root directory set to `web`.
+
+## Settle a ruling with Yellow
+
+Every ruling on the page shows a settle command with its case number:
+
+```bash
+npm run settle -- --case 1
+```
+
+It reads that case from GenLayer (always real) and settles the seller/buyer split through a Yellow app session.
+
+- **Simulated (default):** with no wallet keys in `.env`, the Yellow steps are simulated and the output says so on every line.
+- **Live:** set `BUYER_PK`, `SELLER_PK`, `COURT_PK`, `YELLOW_CHAIN_ID` and `YELLOW_RPC_URL`, and fund the buyer at Yellow. Then the same command settles for real.
 
 ## Trust boundary (read this)
 
