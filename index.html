@@ -208,7 +208,7 @@
           <div><label for="asset">Asset</label><input id="asset" value="GEN"></div>
         </div>
 
-        <button class="primary" id="go" type="submit">Run the case</button>
+        <button class="primary" id="go" type="submit">Open the case</button>
         <div class="error" id="err" role="alert"></div>
       </form>
 
@@ -244,10 +244,21 @@
         <li data-s="settle" data-gen>Contract pays out in GEN</li>
         <li data-s="read">Reading the result</li>
       </ol>
-      <div id="result"><p class="empty">No ruling yet. Run a case to see the verdict here.</p></div>
+      <div id="result"><p class="empty">No ruling yet. Open a case, then file a dispute to see the verdict here.</p></div>
       <div id="settle"></div>
     </section>
   </div>
+
+  <section class="sheet" id="disputeSheet" aria-labelledby="disp-h" style="margin-top:1.5rem">
+    <h2 id="disp-h">File a dispute</h2>
+    <form id="dform" novalidate>
+      <label for="did">Escrow id</label>
+      <input id="did" spellcheck="false" placeholder="Open a case first. Its id appears here.">
+      <div class="hint">The buyer disputes the delivered work. GenLayer validators then rule on every agreed rule, and the result is settled.</div>
+      <button class="primary" id="dgo" type="submit">File the dispute</button>
+      <div class="error" id="derr" role="alert"></div>
+    </form>
+  </section>
 
   <section class="sheet docket" aria-labelledby="dock-h">
     <h2 id="dock-h">Recent escrows</h2>
@@ -429,7 +440,7 @@ async function loadDocket() {
   }
 }
 
-/* ---- Run a case: propose -> accept -> deliver -> dispute -> read ---- */
+/* ---- Step 1: open the case (propose -> accept -> fund -> deliver) ---- */
 $("form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const id = $("eid").value.trim(), url = $("url").value.trim(), asset = $("asset").value.trim(), amount = $("amount").value.trim();
@@ -443,7 +454,7 @@ $("form").addEventListener("submit", async (ev) => {
   if (!/^[A-Za-z0-9_\-]{1,20}$/.test(asset)) { $("err").textContent = "Enter an asset, for example GEN."; return; }
 
   genMode = asset === "GEN";
-  const btn = $("go"); btn.disabled = true; btn.textContent = "Case in progress…"; setCourt("work");
+  const btn = $("go"); btn.disabled = true; btn.textContent = "Opening the case…"; setCourt("work");
   $("result").replaceChildren(); $("settle").replaceChildren();
   const rulesJson = JSON.stringify(rules);
   const txs = {};
@@ -453,6 +464,42 @@ $("form").addEventListener("submit", async (ev) => {
     setStep("accept");   txs.accept_terms = await write(seller, "accept_terms", [id, rulesJson, amount, asset]);
     if (genMode) { setStep("fund"); txs.fund_escrow = await write(buyer, "fund_escrow", [id], toWei(amount)); }
     setStep("submit");   txs.submit_deliverable = await write(seller, "submit_deliverable", [id, url]);
+    setStep("read");
+    const rec = await readEscrow(id);
+    setStep(null);
+    if (!rec) throw new Error("The case was not found after opening. Refresh and check Recent escrows.");
+    $("result").replaceChildren(boundCard(rec, txs), el("p", "hint", "Case opened and the deliverable is submitted. Next, file a dispute below so the validators rule."));
+    $("did").value = id;
+    $("eid").value = newEscrowId();
+    setCourt("idle");
+    loadDocket();
+    $("disputeSheet").scrollIntoView({ block: "nearest" });
+  } catch (e) {
+    setStep(null); setCourt("idle");
+    $("result").replaceChildren(el("p", "empty", "No ruling yet. Open a case, then file a dispute to see the verdict here."));
+    const msg = e && e.message ? e.message : String(e);
+    $("err").textContent = "Something went wrong: " + msg + (genMode && /fund|balance|insufficient|value/i.test(msg) ? " (Does the buyer have GEN? See “Fund the buyer with GEN”.)" : "");
+  } finally {
+    btn.disabled = false; btn.textContent = "Open the case";
+  }
+});
+
+/* ---- Step 2: file the dispute (raise_dispute -> validators rule -> settle) ---- */
+$("dform").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const id = $("did").value.trim();
+  $("derr").textContent = "";
+  if (!contract()) { $("derr").textContent = "Add the contract address under Contract settings first."; return; }
+  if (!id) { $("derr").textContent = "Enter the escrow id of an opened case."; return; }
+
+  const btn = $("dgo"); btn.disabled = true; btn.textContent = "Dispute in progress…"; setCourt("work");
+  $("settle").replaceChildren();
+  const txs = {};
+  try {
+    await ready(buyer);
+    const pre = await readEscrow(id);
+    if (!pre) throw new Error("No case with that escrow id. Open a case first.");
+    genMode = pre.asset === "GEN";
     setStep("dispute");  txs.raise_dispute = await write(buyer, "raise_dispute", [id]);
     if (genMode) { setStep("settle"); txs.settle = await write(buyer, "settle", [id]); }
     setStep("read");
@@ -463,15 +510,12 @@ $("form").addEventListener("submit", async (ev) => {
     $("result").replaceChildren(boundCard(rec, txs), rulingCard(rec));
     $("settle").replaceChildren(genMode ? paidCard(rec) : settleCard(rec));
     setCourt(rec.ruling.seller_percent >= 50 ? "pay" : "refund");
-    $("eid").value = newEscrowId();
     loadDocket();
   } catch (e) {
     setStep(null); setCourt("idle");
-    $("result").replaceChildren(el("p", "empty", "No ruling yet. Run a case to see the verdict here."));
-    const msg = e && e.message ? e.message : String(e);
-    $("err").textContent = "Something went wrong: " + msg + (genMode && /fund|balance|insufficient|value/i.test(msg) ? " (Does the buyer have GEN? See “Fund the buyer with GEN”.)" : "");
+    $("derr").textContent = "Something went wrong: " + (e && e.message ? e.message : String(e));
   } finally {
-    btn.disabled = false; btn.textContent = "Run the case";
+    btn.disabled = false; btn.textContent = "File the dispute";
   }
 });
 
