@@ -7,103 +7,97 @@
 <h1 align="center">Judged Settlement Room</h1>
 
 <p align="center">
-  Agents pool funds in a <b>Yellow</b> settlement room. When they disagree, <b>GenLayer</b> validators
-  read the deliverable and rule, and Yellow settles the split. An <b>Internet Court</b> flow.
+  Two parties agree on rules for an escrow. If they disagree about the work, <b>GenLayer</b> validators
+  rule on every agreed rule and the split is paid out: <b>in GEN by the contract itself</b>, or <b>through Yellow</b>
+  for other assets. An <b>Internet Court</b> flow.
 </p>
 
-> Replace the placeholder wordmarks in `assets/logos/` with the official brand SVGs before publishing.
+**Live page:** _add your Vercel link_ · **Contract (GenLayer Studio):** _add your v3 address_ · **Demo video:** _add link_
 
-**Live demo page:** _add your Vercel link here_ · **Demo video:** _add link here_
+> Replace the placeholder wordmarks in `assets/logos/` and `web/assets/` with the official brand SVGs before publishing.
 
 ---
 
-## The idea
+## How a case works
 
-Yellow's settlement room lets several agents hold funds together, reallocate off-chain, and settle one final split. What a room cannot do is judge whether the work was actually good. That is the missing piece Internet Court is built around, and GenLayer supplies it.
+| # | Who | Call (on `contracts/agent_court_adjudicator.py`) | What it does |
+|---|-----|---|---|
+| 1 | Buyer | `open_escrow(escrow_id, seller, rules_json, amount, asset)` | Case keyed by the **escrow id**; records buyer, seller, **agreed rules**, amount, asset |
+| 2 | Seller | `accept_terms(escrow_id, rules_json, amount, asset)` | Succeeds only with the **identical** rules, amount and asset |
+| 3 | Buyer | `fund_escrow(escrow_id)` payable, **GEN only** | Locks exactly the agreed amount of GEN in the contract |
+| 4 | Seller | `submit_deliverable(escrow_id, url)` | Only the seller; for GEN only after funding |
+| 5a | Buyer | `approve(escrow_id)` | Buyer is satisfied: seller gets 100% |
+| 5b | Buyer | `raise_dispute(escrow_id)` | Validators rule on **every agreed rule**; one ruling per escrow |
+| 6 | Anyone | `settle(escrow_id)`, **GEN only** | The contract pays the recorded seller and buyer in GEN, once |
+| – | Buyer / Seller | `cancel(escrow_id)` | Buyer before anything is locked; once locked, only the seller can release the GEN back |
 
-```
- Buyer ─┐                                   ┌────────────────────────┐
- Seller ├─ Yellow app session (3 signers) ──│ AgentCourtAdjudicator  │
- Court ─┘   funds pooled off-chain          │  web.get → LLM → split │
-                  ▲                         │  validator consensus   │
-                  └──── signed split ◀──────┴────────────────────────┘
-```
+### Two payment rails, one ruling
 
-1. Buyer, seller and a court key open a Yellow app session (weights 1/1/1, quorum 2). Buyer deposits.
-2. Seller submits a public deliverable URL.
-3. Buyer disputes. The GenLayer contract rules: `{"verdict", "seller_percent", "confidence", "reason"}`.
-4. The court signs the ruling, the favoured party co-signs, and Yellow settles the split.
+- **GEN (default on the page):** the buyer locks GEN in the contract; after the ruling `settle()` pays `seller = amount × seller_percent ÷ 100` (rounded down) and the buyer gets the remainder, using exact integer wei. The sum always equals the locked amount.
+- **Other assets (for example usdc):** the funds sit in the Yellow app session whose id is the escrow id; `scripts/settle.ts` applies the same stored percentage through Yellow.
 
-## Why GenLayer is central
+## The split is consensus-bound
 
-- **Non-deterministic web parsing.** `gl.nondet.web.get` reads the live deliverable. The normalized evidence is wrapped in `gl.eq_principle.strict_eq`, so every validator must see identical proof.
-- **LLM judgment by consensus.** The leader's verdict is re-run by validators and accepted through `gl.eq_principle.prompt_comparative` (Optimistic Democracy): the split may differ by at most 10 points.
-- **Fail-safe.** Unreachable evidence or unusable output defaults to a full buyer refund.
+1. Validators fetch the deliverable with `gl.nondet.web.get`; the normalized evidence goes through `gl.eq_principle.strict_eq`, so all of them must see identical proof.
+2. Each validator judges **each agreed rule** separately. `gl.eq_principle.prompt_comparative` accepts a result only if the pass/fail list is identical element by element (Optimistic Democracy).
+3. The contract computes `seller_percent = round(100 × rules_passed ÷ rules_total)` from that agreed list. There is no free-form LLM number. An unreachable deliverable fails every rule with no LLM call; unusable validator output fails every rule (fail-safe: refund).
+4. Whatever pays out (the contract in GEN, or the script through Yellow) applies exactly that stored percentage.
 
-Remove GenLayer and nothing decides the split.
+## Why GenLayer and Yellow are both here
 
-## Why Yellow is central
-
-The room is where the money lives. Funds are pooled and reallocated off-chain with no per-step gas, and the final split settles through Yellow's non-custodial clearing. The court never holds funds: no allocation changes without signatures that meet quorum.
+- **GenLayer** reads the live web page, judges it against the agreed rules with validator consensus, and for GEN also holds and pays the money. Remove it and nothing decides or pays.
+- **Yellow** is the non-custodial off-chain room for agent funds in other assets: pooled and reallocated off-chain, only final balances settle, the court key never holds funds.
 
 ## Repository
 
 | Path | Purpose |
 |------|---------|
-| `contracts/agent_court_adjudicator.py` | GenLayer Intelligent Contract (`resolve_dispute` → split) |
-| `scripts/yellow_settlement.ts` | End-to-end demo: Yellow room + GenLayer ruling + settlement |
-| `scripts/settle.ts` | `npm run settle -- --case N`: settle one GenLayer ruling through a Yellow room |
-| `scripts/lib/yellow_room.ts` | Shared Yellow room helpers (live or simulated) |
-| `web/index.html` | Public interface (deploys as a static page on Vercel) |
-| `skills/internet_court_yellow_genlayer_skill.md` | Agent skill; composes with Yellow's settlement-room skill |
-| `demo/deliverable.md` | Sample deliverable the demo adjudicates |
+| `contracts/agent_court_adjudicator.py` | The Intelligent Contract (source of truth for every method the page and scripts call) |
+| `tests/test_adjudicator.py` | Local tests of the contract logic (`npm test`) |
+| `scripts/gen_settlement.ts` | Whole flow paid in GEN (`npm run demo:gen`) |
+| `scripts/yellow_settlement.ts` | Whole flow through Yellow (`npm run demo`) |
+| `scripts/settle.ts` | Settle one ruled escrow (`npm run settle -- --escrow <id>`) |
+| `scripts/lib/*.ts` | GenLayer and Yellow helpers |
+| `web/index.html` | Public page (static; deploy `web/` on Vercel) |
+| `skills/internet_court_yellow_genlayer_skill.md` | Agent skill |
+| `VERIFY.md` | Step-by-step verification of the whole flow |
 
 ## Run it
-
-**1. Deploy the contract** in [GenLayer Studio](https://studio.genlayer.com): paste `contracts/agent_court_adjudicator.py`, deploy with no arguments, copy the address into `.env` as `ADJUDICATOR_ADDRESS`.
-
-**2. Install and run (dry mode, no Yellow funds needed):**
 
 ```bash
 npm install && cp .env.example .env
 ```
 
+1. Deploy `contracts/agent_court_adjudicator.py` in [GenLayer Studio](https://studio.genlayer.com) with no arguments. Put the address in `.env` as `ADJUDICATOR_ADDRESS` and in `DEFAULT_CONTRACT` in `web/index.html`.
+2. Check the contract logic locally:
+
 ```bash
-npm run demo:dry
+npm test
 ```
 
-Dry mode runs the real GenLayer ruling and simulates the Yellow steps, and says so on screen.
+3. Paid in GEN. Set `BUYER_PK` to a key that holds GEN (Studio and Studionet: the 💧 faucet in the account selector; testnet: the GenLayer testnet faucet), then:
 
-**3. Live mode:** fill `BUYER_PK`, `SELLER_PK`, `COURT_PK`, `YELLOW_CHAIN_ID`, `YELLOW_RPC_URL` in `.env`, then:
+```bash
+npm run demo:gen
+```
+
+4. Through Yellow (simulated unless funded Yellow wallet keys are set; the output says so):
 
 ```bash
 npm run demo
 ```
 
-Funding: Yellow's skill never funds accounts, so the buyer must already hold `ESCROW_AMOUNT` of `YELLOW_ASSET` at Yellow. Follow Yellow's quickstart at `docs.yellow.org` for the one-time deposit.
+See `VERIFY.md` for what each step should show and how to read the stored case.
 
-**4. Web page:** put your contract address in `DEFAULT_CONTRACT` inside `web/index.html` (or open the page with `?contract=0x…`), upload the repo to GitHub, and import it in Vercel with the root directory set to `web`.
+## Trust boundary
 
-## Settle a ruling with Yellow
-
-Every ruling on the page shows a settle command with its case number:
-
-```bash
-npm run settle -- --case 1
-```
-
-It reads that case from GenLayer (always real) and settles the seller/buyer split through a Yellow app session.
-
-- **Simulated (default):** with no wallet keys in `.env`, the Yellow steps are simulated and the output says so on every line.
-- **Live:** set `BUYER_PK`, `SELLER_PK`, `COURT_PK`, `YELLOW_CHAIN_ID` and `YELLOW_RPC_URL`, and fund the buyer at Yellow. Then the same command settles for real.
-
-## Trust boundary (read this)
-
-- No participant can change another's allocation without signatures meeting quorum.
-- The **court key is a relayer**: it signs what GenLayer decided. Yellow does not read GenLayer natively. With quorum 2 of 3, the court plus one party can settle without the other, so set quorum 3 if you want unanimity.
-- The Yellow node is trusted for liveness; funds are not an on-chain escrow while inside the session.
-- All three keys run in one process in this demo for readability. A real deployment signs from separate processes.
-- Testnet only. Rulings are LLM-generated and unaudited.
+- Each case is bound to its escrow id, both parties' addresses, and the rules, amount and asset both parties accepted. Rules cannot be supplied at dispute time and a case is ruled once.
+- GEN is held by the contract and can only be paid to the recorded seller and buyer, once, in the stored proportion. Anyone may trigger `settle()`.
+- There is no deadline. If the seller never delivers, the locked GEN stays until the seller releases it with `cancel()`. A production version needs a timeout path.
+- Yellow rail: the **court key is a relayer** that signs what GenLayer decided; with quorum 2 of 3 the court plus one party can settle without the other. Settlement scripts read accepted GenLayer state; wait for finality on production networks.
+- `tests/test_adjudicator.py` exercises the contract logic against a stand-in for the SDK (including the GEN payouts). It does not test GenLayer consensus; use Studio for that.
+- The Yellow steps are simulated unless funded wallet keys are set. The web page uses throwaway demo keys; the contract, not the page, enforces who may do what.
+- Testnet only. Rulings are LLM-assisted and unaudited.
 
 ## License
 
