@@ -54,6 +54,6 @@ Open the live page, run a case, and compare the escrow id, rules and split it sh
 ## Links (fill in before sending)
 
 - Repository (this source): `<repo URL>`
-- Contract on GenLayer Studio: `0x4153658F4d825bAd5a58B09CFAF6139eFe4090dF`
+- Contract on GenLayer Studio: `0xa4CA829658fdF8Ece71d760d0E918bd649A48dae`
 - Example escrow id and transaction hashes: `<from the npm run demo summary>`
 - Live page: `<Vercel URL>`
