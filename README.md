@@ -12,7 +12,7 @@
   for other assets. An <b>Internet Court</b> flow.
 </p>
 
-**Live page:** _add your Vercel link_ · **Contract (GenLayer Studio):** _add your v3 address_ · **Demo video:** _add link_
+**Live page:** _add your Vercel link_ · **Contract (GenLayer Studio):** `0xa4CA829658fdF8Ece71d760d0E918bd649A48dae` · **Demo video:** _add link_
 
 > Replace the placeholder wordmarks in `assets/logos/` and `web/assets/` with the official brand SVGs before publishing.
 
