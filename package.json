@@ -1,20 +1,27 @@
 {
-  "name": "agent-court",
+  "name": "internet-court-partner-demo-lab",
   "version": "1.0.0",
-  "private": true,
+  "description": "Judged Settlement Room — Internet Court x GenLayer x Yellow",
   "type": "module",
-  "description": "Agent Court: AI rulings on GenLayer, settled through a Yellow room",
   "scripts": {
-    "settle": "tsx scripts/settle.ts"
+    "demo": "tsx scripts/yellow_settlement.ts",
+    "demo:gen": "tsx scripts/gen_settlement.ts",
+    "settle": "tsx scripts/settle.ts",
+    "demo:dry": "YELLOW_MODE=dry tsx scripts/yellow_settlement.ts",
+    "demo:local": "GENLAYER_NETWORK=localnet tsx scripts/yellow_settlement.ts",
+    "test": "python3 tests/test_adjudicator.py",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "decimal.js": "^10.6.0",
-    "dotenv": "^16.4.7",
-    "genlayer-js": "^1.1.8",
-    "viem": "^2.57.0"
+    "@yellow-org/sdk": "^1",
+    "decimal.js": "^10.4.3",
+    "dotenv": "^16.4.5",
+    "genlayer-js": "latest",
+    "viem": "^2.21.0"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
-    "tsx": "^4.23.0"
+    "@types/node": "^20.14.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0"
   }
 }
