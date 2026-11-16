@@ -265,7 +265,7 @@
     <div id="docket"><p class="empty">Loading cases…</p></div>
   </section>
 
-  <footer>Internet Court · GenLayer · Yellow. Runs on GenLayer Studio (testnet). Rulings are produced by LLM validators and are for testing only. Source: the repository's <code>contracts/</code> and <code>scripts/</code> folders.</footer>
+  <footer>Internet Court · GenLayer · Yellow. Runs on GenLayer Studio (testnet). Rulings are produced by LLM validators and are for testing only. Source: <a href="https://github.com/Perorworld/agent-court">github.com/Perorworld/agent-court</a> (<code>contracts/</code>, <code>scripts/</code>, <code>tests/</code>).</footer>
 </main>
 
 <script type="module">
@@ -273,7 +273,7 @@ import { createClient, createAccount, generatePrivateKey } from "https://esm.sh/
 import { studionet } from "https://esm.sh/genlayer-js@latest/chains";
 
 /* ---- Set after deploying contracts/agent_court_adjudicator.py in GenLayer Studio (or use ?contract=0x…) ---- */
-const DEFAULT_CONTRACT = "0x4153658F4d825bAd5a58B09CFAF6139eFe4090dF";
+const DEFAULT_CONTRACT = "0xa4CA829658fdF8Ece71d760d0E918bd649A48dae";
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
