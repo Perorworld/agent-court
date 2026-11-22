@@ -1,29 +1,30 @@
 /**
- * Settle one GenLayer ruling through a Yellow settlement room.
+ * Settle one finished GenLayer ruling through its Yellow settlement room.
  *
- *   npm run settle -- --case 1
+ *   npm run settle -- --escrow <escrow id>
  *
- * Reads case <N> from the AgentCourtAdjudicator on GenLayer, turns its seller_percent into
- * allocations, and settles them in a Yellow app session (open -> deposit -> operate -> close).
+ * The escrow id is the Yellow app session id the case is bound to on GenLayer. The script:
+ *   1. reads the escrow record from the AgentCourtAdjudicator (state must be RULED);
+ *   2. checks that your wallet keys are the buyer and seller recorded in that case (live mode);
+ *   3. applies exactly the stored seller_percent to the stored amount (rounding down for the
+ *      seller, remainder to the buyer) and checks the allocations add up;
+ *   4. operates and closes the existing Yellow session.
  *
- * LIVE   : BUYER_PK, SELLER_PK, COURT_PK set in .env -> real Yellow Nitronode calls.
- * SIMULATED : otherwise. The ruling is still read for real from GenLayer, and the output says
- *             plainly that the Yellow steps are simulated.
+ * GEN escrows (asset "GEN") are paid by the contract itself: this script just calls settle(), then
+ * prints the exact payout the contract recorded. Any other asset is settled through Yellow:
+ *
+ * LIVE      : BUYER_PK, SELLER_PK, COURT_PK in .env -> real Yellow calls on the existing session.
+ * SIMULATED : otherwise. The ruling is still read for real from GenLayer; the output says so.
  *
  * LOCAL DEMO NOTE: all three keys run in one process. A real deployment signs from separate processes.
  */
 import "dotenv/config";
-import { createClient, createAccount, generatePrivateKey } from "genlayer-js";
-import { studionet, localnet } from "genlayer-js/chains";
 import { Decimal } from "decimal.js";
 import { privateKeyToAddress, generatePrivateKey as evmKey } from "viem/accounts";
-import { LIVE, WS_URL, ASSET, AMOUNT, QUORUM, liveRoom, dryRoom } from "./lib/yellow_room.js";
+import { LIVE, WS_URL, QUORUM, liveRoom, dryRoom } from "./lib/yellow_room.js";
+import { glClient, send, readEscrow, splitAmounts, requireRuling, adjudicatorAddress, fromWei, type Hex } from "./lib/court.js";
 
 const env = process.env;
-const NETWORK = env.GENLAYER_NETWORK ?? "studionet";
-const CHAIN = NETWORK === "localnet" ? localnet : studionet;
-const ADJUDICATOR = (env.ADJUDICATOR_ADDRESS || "0xa311d5a6b22e07e0aA112E7c2488eF53271F8498") as `0x${string}`;
-
 const c = { reset: "\x1b[0m", bold: "\x1b[1m", dim: "\x1b[2m", red: "\x1b[31m", green: "\x1b[32m",
   yellow: "\x1b[33m", magenta: "\x1b[35m", cyan: "\x1b[36m", gray: "\x1b[90m" };
 const ts = () => `${c.gray}[${new Date().toISOString().slice(11, 23)}]${c.reset}`;
@@ -31,64 +32,76 @@ const short = (h: string) => `${h.slice(0, 8)}…${h.slice(-6)}`;
 const log = (tag: string, color: string, msg: string) =>
   console.log(`${ts()} ${color}${c.bold}${tag.padEnd(10)}${c.reset} ${msg}`);
 
-interface CaseRecord {
-  case_id: number;
-  deliverable_url: string;
-  verdict: string;
-  seller_percent?: number;
-  confidence: number;
-  reason: string;
-}
-
-/** Read `--case N` (or `--case=N`) from the command line. */
-function parseCaseId(argv: string[]): number {
-  const i = argv.findIndex((a) => a === "--case" || a.startsWith("--case="));
-  const raw = i === -1 ? undefined : argv[i].includes("=") ? argv[i].split("=")[1] : argv[i + 1];
-  const n = Number(raw);
-  if (raw === undefined || !Number.isInteger(n) || n < 0) {
-    throw new Error("Usage: npm run settle -- --case <number>   (the case number is shown on the Agent Court page)");
-  }
-  return n;
+/** Read `--escrow <id>` (or `--escrow=<id>`) from the command line. */
+function parseEscrowId(argv: string[]): string {
+  const i = argv.findIndex((a) => a === "--escrow" || a.startsWith("--escrow="));
+  const raw = i === -1 ? undefined : argv[i].includes("=") ? argv[i].split("=").slice(1).join("=") : argv[i + 1];
+  if (!raw) throw new Error("Usage: npm run settle -- --escrow <escrow id>   (the escrow id is shown on the Agent Court page)");
+  return raw;
 }
 
 async function main(): Promise<void> {
-  const caseId = parseCaseId(process.argv.slice(2));
+  const escrowId = parseEscrowId(process.argv.slice(2));
+  const contract = adjudicatorAddress();
+  if (!contract) throw new Error("Set ADJUDICATOR_ADDRESS in .env to the deployed AgentCourtAdjudicator address.");
 
-  console.log(`\n${c.bold}${c.yellow}  ⚖️  SETTLE CASE ${caseId}${c.reset}  ${c.dim}Internet Court × GenLayer × Yellow${c.reset}`);
+  console.log(`\n${c.bold}${c.yellow}  ⚖️  SETTLE ESCROW ${short(escrowId)}${c.reset}  ${c.dim}Internet Court × GenLayer × Yellow${c.reset}`);
   log("MODE", c.cyan, LIVE
     ? `${c.bold}LIVE${c.reset} Yellow @ ${WS_URL}`
     : `${c.bold}${c.yellow}SIMULATED${c.reset} Yellow settlement (set BUYER_PK, SELLER_PK, COURT_PK in .env for live)`);
 
-  // 1) Read the ruling from GenLayer (always real)
-  const gl = createClient({ chain: CHAIN, account: createAccount(generatePrivateKey()) });
-  log("GENLAYER", c.magenta, `Reading case ${caseId} from ${c.bold}${short(ADJUDICATOR)}${c.reset}`);
-  const raw = (await gl.readContract({ address: ADJUDICATOR, functionName: "get_case", args: [caseId] })) as string;
-  if (!raw) throw new Error(`Case ${caseId} not found on ${ADJUDICATOR}.`);
-  const ruling = JSON.parse(raw) as CaseRecord;
+  // 1) Read the bound case from GenLayer (always real)
+  const reader = await glClient(evmKey());
+  log("GENLAYER", c.magenta, `Reading escrow ${short(escrowId)} from ${c.bold}${short(contract)}${c.reset}`);
+  const rec = await readEscrow(reader, contract, escrowId);
+  requireRuling(rec, escrowId);
+  const ruling = rec.ruling;
+  log("BOUND", c.cyan, `buyer ${short(rec.buyer)} · seller ${short(rec.seller)} · ${rec.amount} ${rec.asset} · ${rec.rules.length} agreed rules`);
+  ruling.rule_results.forEach((ok, i) => log("RULE", ok ? c.green : c.red, `${ok ? "✔" : "✘"} ${rec.rules[i]}`));
+  const color = ruling.seller_percent >= 50 ? c.green : c.red;
+  log("RULING", color, `${c.bold}${ruling.rules_passed}/${ruling.rules_total} rules met → Seller ${ruling.seller_percent}% · Buyer ${100 - ruling.seller_percent}%${c.reset}  (${ruling.source})`);
 
-  const pct = ruling.seller_percent ?? (ruling.verdict === "PAY_SELLER" ? 100 : 0);
-  const sellerAmt = AMOUNT.mul(pct).div(100).toDecimalPlaces(6);
-  const buyerAmt = AMOUNT.minus(sellerAmt);
-  const color = pct >= 50 ? c.green : c.red;
-  log("RULING", color, `${c.bold}Seller ${pct}% · Buyer ${100 - pct}%${c.reset}  confidence ${ruling.confidence}%`);
-  log("RULING", c.gray, ruling.reason);
+  // GEN rail: the contract pays out on GenLayer
+  if (rec.asset === "GEN") {
+    const caller = await glClient((env.COURT_PK ?? env.BUYER_PK ?? evmKey()) as Hex);
+    const { seller: s, buyer: b } = splitAmounts(new Decimal(rec.amount), ruling.seller_percent);
+    log("GEN", c.cyan, `expected payout: seller ${s} GEN + buyer ${b} GEN = ${rec.amount} GEN`);
+    const hash = await send(caller, contract, "settle", [escrowId]);
+    log("GEN", c.green, `✔ settle() accepted  ${c.dim}${short(hash)}${c.reset}`);
+    const after = await readEscrow(reader, contract, escrowId);
+    const pay = after?.payout as { seller_wei: string; buyer_wei: string };
+    log("PAID", c.green, `${c.bold}seller ${fromWei(pay.seller_wei)} GEN · buyer ${fromWei(pay.buyer_wei)} GEN${c.reset} (paid by the contract on GenLayer)`);
+    if (fromWei(pay.seller_wei) !== s.toString() && !new Decimal(fromWei(pay.seller_wei)).eq(s)) throw new Error("Contract payout differs from the expected split");
+    console.log("");
+    return;
+  }
 
-  // 2) Settle through Yellow
+  // 2) The keys we hold must be the parties recorded in the case
   const pk = {
-    buyer: (env.BUYER_PK ?? evmKey()) as `0x${string}`,
-    seller: (env.SELLER_PK ?? evmKey()) as `0x${string}`,
-    court: (env.COURT_PK ?? evmKey()) as `0x${string}`,
+    buyer: (env.BUYER_PK ?? evmKey()) as Hex,
+    seller: (env.SELLER_PK ?? evmKey()) as Hex,
+    court: (env.COURT_PK ?? evmKey()) as Hex,
   };
-  log("ROOM", c.cyan, `buyer ${short(privateKeyToAddress(pk.buyer))}  seller ${short(privateKeyToAddress(pk.seller))}  court ${short(privateKeyToAddress(pk.court))}  quorum ${QUORUM}/3`);
+  if (LIVE) {
+    const okParties =
+      privateKeyToAddress(pk.buyer).toLowerCase() === rec.buyer.toLowerCase() &&
+      privateKeyToAddress(pk.seller).toLowerCase() === rec.seller.toLowerCase();
+    if (!okParties) throw new Error("BUYER_PK / SELLER_PK do not match the buyer and seller recorded in this escrow. Refusing to settle.");
+    log("BOUND", c.green, "✔ wallet keys match the buyer and seller recorded on GenLayer");
+  }
 
-  const room = LIVE ? await liveRoom(pk, ruling.deliverable_url) : dryRoom();
+  // 3) Exact amounts from the stored percentage
+  const { seller: sellerAmt, buyer: buyerAmt } = splitAmounts(new Decimal(rec.amount), ruling.seller_percent);
+  log("SPLIT", c.cyan, `${sellerAmt} + ${buyerAmt} = ${rec.amount} ${rec.asset} ✔`);
+
+  // 4) Settle on the existing Yellow session
+  const room = LIVE ? await liveRoom(pk, rec.deliverable_url, escrowId) : dryRoom(escrowId);
   const sessionId = await room.open();
-  log("YELLOW", c.yellow, `${LIVE ? "" : "(simulated) "}app session ${c.bold}${short(sessionId)}${c.reset} opened`);
-  await room.deposit();
-  log("YELLOW", c.yellow, `${LIVE ? "" : "(simulated) "}buyer deposited ${c.bold}${AMOUNT} ${ASSET}${c.reset}`);
-  log("COURT", c.cyan, `court signs the ruling; ${pct >= 50 ? "seller" : "buyer"} co-signs → quorum met`);
-  await room.settle(sellerAmt, buyerAmt, pct >= 50 ? "seller" : "buyer");
-  log("YELLOW", c.green, `${LIVE ? "" : "(simulated) "}room closed · seller ${c.bold}${sellerAmt} ${ASSET}${c.reset} · buyer ${c.bold}${buyerAmt} ${ASSET}${c.reset}`);
+  log("YELLOW", c.yellow, `${LIVE ? "" : "(simulated) "}attached to app session ${c.bold}${short(sessionId)}${c.reset}`);
+  const favoured = ruling.seller_percent >= 50 ? "seller" : "buyer";
+  log("COURT", c.cyan, `court signs the stored ruling; ${favoured} co-signs → quorum ${QUORUM}/3 met`);
+  await room.settle(sellerAmt, buyerAmt, favoured);
+  log("YELLOW", c.green, `${LIVE ? "" : "(simulated) "}room closed · seller ${c.bold}${sellerAmt} ${rec.asset}${c.reset} · buyer ${c.bold}${buyerAmt} ${rec.asset}${c.reset}`);
   if (!LIVE) log("NOTE", c.yellow, "Nothing was sent to Yellow. Add funded wallet keys to .env to settle for real.");
   console.log("");
 }
