@@ -316,6 +316,10 @@ $("addr").value = params.get("contract") || store.get("ac_addr") || DEFAULT_CONT
 $("addr").addEventListener("change", () => { store.set("ac_addr", $("addr").value.trim()); loadDocket(); });
 const contract = () => $("addr").value.trim();
 
+/* ---- Transaction log: all hashes of a case, kept so the final card lists every step ---- */
+const txLog = (() => { try { return JSON.parse(store.get("ac_txs") || "{}"); } catch { return {}; } })();
+const saveTxs = (id, txs) => { txLog[id] = { ...(txLog[id] || {}), ...txs }; store.set("ac_txs", JSON.stringify(txLog)); return txLog[id]; };
+
 /* ---- Helpers ---- */
 const newEscrowId = () => "demo-" + Math.random().toString(16).slice(2, 10);
 $("eid").value = newEscrowId();
@@ -380,7 +384,7 @@ function boundCard(rec, txs) {
   line("Buyer", rec.buyer);
   line("Seller", rec.seller);
   line("Escrow", rec.amount + " " + rec.asset);
-  line("Terms", "both parties accepted these exact " + rec.rules.length + " rules before delivery.");
+  line("Terms", "both parties accepted these exact " + rec.rules.length + (rec.rules.length === 1 ? " rule" : " rules") + " before delivery.");
   if (rec.asset === "GEN") line("Locked", fromWei(rec.funded_wei) + " GEN held by the contract until the ruling is settled.");
   Object.entries(txs || {}).forEach(([k, v]) => line(k, v));
   return b;
@@ -468,7 +472,7 @@ $("form").addEventListener("submit", async (ev) => {
     const rec = await readEscrow(id);
     setStep(null);
     if (!rec) throw new Error("The case was not found after opening. Refresh and check Recent escrows.");
-    $("result").replaceChildren(boundCard(rec, txs), el("p", "hint", "Case opened and the deliverable is submitted. Next, file a dispute below so the validators rule."));
+    $("result").replaceChildren(boundCard(rec, saveTxs(id, txs)), el("p", "hint", "Case opened and the deliverable is submitted. Next, file a dispute below so the validators rule."));
     $("did").value = id;
     $("eid").value = newEscrowId();
     setCourt("idle");
@@ -507,7 +511,7 @@ $("dform").addEventListener("submit", async (ev) => {
     setStep(null);
     const finished = genMode ? "SETTLED" : "RULED";
     if (!rec || rec.state !== finished) throw new Error("The case did not reach " + finished + ". Refresh and check Recent escrows.");
-    $("result").replaceChildren(boundCard(rec, txs), rulingCard(rec));
+    $("result").replaceChildren(boundCard(rec, saveTxs(id, txs)), rulingCard(rec));
     $("settle").replaceChildren(genMode ? paidCard(rec) : settleCard(rec));
     setCourt(rec.ruling.seller_percent >= 50 ? "pay" : "refund");
     loadDocket();
